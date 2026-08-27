@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>人民币大写转换 — 批量在线工具 RMB Uppercase Converter</title>
+<meta name="description" content="Free offline RMB uppercase converter: paste multiple amounts (发票/合同文本) and get 人民币大写 for each, with one-click copy. 发票财务规范，纯离线单文件。">
+<style>
+:root{--bg:#0d1117;--card:#161b22;--border:#30363d;--fg:#e6edf3;--muted:#8b949e;--accent:#39d2c0;--green:#3fb950}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--fg);font-family:-apple-system,"Segoe UI","Noto Sans SC",sans-serif;line-height:1.6;padding:22px}
+.wrap{max-width:960px;margin:0 auto}
+h1{font-size:25px}h1 .c{color:var(--accent)}
+.tag{color:var(--muted);font-size:13.5px;margin-top:4px}
+.tabs{display:flex;gap:8px;margin-top:16px}
+.tab{padding:8px 18px;border-radius:6px 6px 0 0;border:1px solid var(--border);border-bottom:none;background:var(--card);cursor:pointer;font-size:13.5px;color:var(--muted)}
+.tab.on{color:var(--fg);border-bottom:1px solid var(--bg)}
+label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:5px}
+textarea,input[type=text]{width:100%;background:var(--card);color:var(--fg);border:1px solid var(--border);border-radius:8px;padding:12px;font:13.5px/1.6 ui-monospace,Consolas,"Noto Sans SC",monospace}
+textarea{height:170px;resize:vertical}
+input[type=text]{font-size:15px}
+.btnrow{display:flex;gap:10px;margin-top:12px;align-items:center}
+button.primary{background:#1a7f64;color:#fff;border:none;border-radius:6px;padding:10px 20px;font-weight:600;cursor:pointer;font-size:14px}
+button.ghost{background:transparent;color:var(--accent);border:1px solid var(--border);border-radius:6px;padding:9px 14px;cursor:pointer;font-size:13px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-top:16px;padding:16px}
+.hidden{display:none}
+ul.plain{list-style:none;font-size:14px}
+ul.plain li{padding:7px 0;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:10px;align-items:center}
+.up{color:var(--green);font-family:"Noto Sans SC",serif;font-weight:600;letter-spacing:.5px}
+.raw{color:var(--muted);font-family:ui-monospace,Consolas,monospace}
+.copied{color:var(--accent);font-size:11px;margin-left:6px}
+.warnbox{margin-top:10px;padding:9px 12px;border-radius:6px;background:rgba(210,153,34,.1);color:#d29922;font-size:12.5px}
+code{background:#21262d;border-radius:4px;padding:1px 6px;font-size:12px}
+footer{margin-top:22px;color:var(--muted);font-size:12px;text-align:center}
+footer a{color:var(--accent)}
+.bigout{font-size:19px;color:var(--green);font-family:"Noto Sans SC",serif;font-weight:700;letter-spacing:1px;margin-top:10px;min-height:28px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>人民币<span class="c">大写转换</span></h1>
+<div class="tag">粘贴含金额的文本（发票、合同、工资单…），逐条给出票据级大写 · Batch RMB uppercase converter — offline port of <a href="https://github.com/qianbrady" style="color:var(--accent)">oxalpha's engine</a>, nothing leaves your browser.</div>
+
+<div class="tabs">
+  <div class="tab on" id="tabBatch" onclick="showTab('batch')">① 批量 Batch</div>
+  <div class="tab" id="tabSingle" onclick="showTab('single')">② 单笔 Single</div>
+</div>
+
+<div id="paneBatch">
+  <textarea id="batchIn" placeholder="发票A: ¥1,234.56&#10;合同金额 105000.03 元&#10;报销合计 88.5"></textarea>
+  <div class="btnrow"><button class="primary" onclick="runBatch()">转换 Convert</button><button class="ghost" onclick="loadBatchExample()">加载示例 Load example</button><span id="copyState" style="color:var(--accent);font-size:12px"></span></div>
+  <div id="batchOut"></div>
+</div>
+
+<div id="paneSingle" class="hidden">
+  <label>金额 Amount（支持 ¥ 前缀 / 千分位逗号 / 最多两位小数 / 负号）</label>
+  <input type="text" id="singleIn" placeholder="¥1,234.56" oninput="runSingle()">
+  <div class="bigout" id="singleOut"></div>
+  <div class="warnbox hidden" id="singleErr"></div>
+</div>
+
+<footer>规则：零壹贰叁肆伍陆柒捌玖 · 万亿分组建位 · 零折叠 · .00 尾整（详见 <code>engine.py</code> docstring）· 支持 ≤999999999999.99<br>
+More free offline tools: <a href="/readmescore/">ReadmeScore</a> · <a href="/promptdriftcheck/">PromptDriftCheck</a> · <a href="/weeklychangelog/">WeeklyChangelog</a> · <a href="/llmcostboard/">LLMCostBoard</a> · <a href="/termtideweb/">TermTideWeb</a> · <a href="/dotenvguardian/">DotEnvGuardian</a> · <a href="/tokentimeline/">TokenTimeline</a><br>
+© 2025 MIT</footer>
+</div>
+
+<script>
+"use strict";
+/* ---- line-by-line port of rmbupper/engine.py ---- */
+const DIGITS = "零壹贰叁肆伍陆柒捌玖";
+const IN_GROUP_UNITS = {4:"仟",3:"佰",2:"拾",1:""};
+const GROUP_SCALES = ["", "万", "亿"];
+const MAX_INT_DIGITS = 12;
+const NUM_RE = /^(?:￥|¥)?(?:(?:[0-9]{1,3}(?:,[0-9]{3})+)|[0-9]+)(?:\.([0-9]{1,2}))?$/;
+const CANDIDATE_RE = /(?<![0-9.])(?:[￥¥])?(?:[0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?|[0-9]+(?:\.[0-9]{1,2})?)(?![0-9.,])/g;
+const NEG_RE = /^([-−–]|负)/;
+
+function clean(s){
+  s = s.trim();
+  let neg=false;
+  const nm = NEG_RE.exec(s);
+  if(nm){neg=true;s=s.slice(nm[0].length).trim();}
+  const m = NUM_RE.exec(s);
+  if(!m) throw new Error("无法解析金额");
+  let intPart = m[0].replace(/^[￥¥]/,"").split(".")[0].replace(/,/g,"").replace(/^0+/,"") || "0";
+  let fracRaw = m[1] || "";
+  const frac = (fracRaw+"00").slice(0,2);
+  if(intPart.length > MAX_INT_DIGITS) throw new Error("超出上限");
+  if(intPart==="0" && frac==="00") neg=false;
+  return {neg,intPart,frac};}
+
+function groupUpper(g4){
+  let res="";
+  for(let i=0;i<g4.length;i++){
+    const d=+g4[i];
+    if(d===0){ if(res && !res.endsWith("零")) res+="零"; }
+    else res += DIGITS[d] + (IN_GROUP_UNITS[g4.length-i]||"");}
+  return res.replace(/零+$/,"");}
+
+function intToUpper(intPart){
+  let s=intPart.replace(/^0+/,"");
+  if(!s)return "";
+  const pad=(4-(s.length%4))%4;
+  s="0".repeat(pad)+s;
+  const nGroups=s.length/4;
+  let out="";
+  for(let gi=0;gi<nGroups;gi++){
+    const g=s.slice(gi*4,gi*4+4);
+    const val=+g;
+    if(val===0)continue;
+    if(out && val<1000) out+="零";
+    out += groupUpper(g) + GROUP_SCALES[nGroups-1-gi];}
+  return out;}
+
+function toRmbUpper(amountStr){
+  if(typeof amountStr!=="string") throw new Error("必须是字符串");
+  const {neg,intPart,frac}=clean(amountStr);
+  const upperInt=intToUpper(intPart);
+  const zeroInt = upperInt==="";
+  let body;
+  if(zeroInt && frac==="00") body="零元";
+  else if(zeroInt) body="";
+  else body=upperInt+"元";
+  let fracTxt;
+  if(frac==="00") fracTxt="整";
+  else{
+    const jiao=frac[0], fen=frac[1];
+    let txt="";
+    if(jiao!=="0") txt += DIGITS[+jiao]+"角";
+    if(fen!=="0"){ if(jiao==="0") txt+="零"; txt += DIGITS[+fen]+"分"; }
+    fracTxt=txt;}
+  return (neg?"负":"")+body+fracTxt;}
+
+function parseBatch(text){
+  const results=[];
+  for(const line of text.split(/\r?\n/)){
+    CANDIDATE_RE.lastIndex=0;
+    let m;
+    while((m=CANDIDATE_RE.exec(line))!==null){
+      try{results.push([m[0],toRmbUpper(m[0])]);}catch(e){}}}
+  return results;}
+
+/* ---- UI ---- */
+let MODE="batch";
+function showTab(m){
+  MODE=m;
+  document.getElementById("tabBatch").className="tab"+(m==="batch"?" on":"");
+  document.getElementById("tabSingle").className="tab"+(m==="single"?" on":"");
+  document.getElementById("paneBatch").classList.toggle("hidden",m!=="batch");
+  document.getElementById("paneSingle").classList.toggle("hidden",m!=="single");}
+function esc(s){return String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));}
+function runSingle(){
+  const v=document.getElementById("singleIn").value.trim();
+  const out=document.getElementById("singleOut"), err=document.getElementById("singleErr");
+  out.textContent="";err.classList.add("hidden");
+  if(!v)return;
+  try{out.textContent=toRmbUpper(v);}catch(e){err.textContent="⚠ "+(v.length>40?v.slice(0,40)+"…":v)+" — "+e.message;err.classList.remove("hidden");}}
+function runBatch(){
+  const text=document.getElementById("batchIn").value;
+  const pairs=parseBatch(text);
+  const box=document.getElementById("batchOut");
+  if(!pairs.length){box.innerHTML='<div class="warnbox">未在文本中提取到金额——每行可包含一个或多个数字金额（支持 ¥ 前缀与千分位逗号）。No amounts extracted.</div>';return;}
+  let h=`<div class="card"><ul class="plain">`;
+  pairs.forEach(([raw,up],i)=>{
+    h+=`<li><span class="raw">${esc(raw)}</span><span class="up">${esc(up)}</span><button class="ghost" data-i="${i}" onclick="copyOne(this)">复制</button></li>`;});
+  h+=`</ul></div>`;
+  box.innerHTML=h;}
+function copyOne(btn){
+  const li=btn.closest("li");
+  const up=li.querySelector(".up").textContent;
+  navigator.clipboard.writeText(up).then(()=>{
+    btn.textContent="已复制 ✓";setTimeout(()=>btn.textContent="复制",1200);}).catch(()=>{});}
+function loadBatchExample(){
+  document.getElementById("batchIn").value="发票A: ¥1,234.56\n合同金额 105000.03 元\n报销合计 88.5\n保证金 100200340.00";
+  runBatch();}
+document.addEventListener("click",()=>{/* noop; keeps onclick inline */});
+</script>
+</body>
+</html>
